@@ -1,11 +1,13 @@
 """
-工程运维界面
+工程运维界面 - v1.0.1
 """
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 from logic.exporter import Exporter
+from utils.logger import logger
+
 
 class ProjectView:
     """工程运维界面类"""
@@ -19,6 +21,11 @@ class ProjectView:
         # 用于存储所有节点的Entry引用
         self.node_entries = {}
         
+        # 标签管理
+        self.available_tags = ["功能复合", "单一职责", "服务层"]  # 默认标签
+        self.node_tags = {}  # 存储每个节点的标签
+        
+        logger.info("Initializing project view")
         self.setup_ui()
     
     def setup_ui(self):
@@ -28,8 +35,8 @@ class ProjectView:
             widget.destroy()
         
         # 设置窗口标题和大小
-        self.root.title("工程运维 - 结构展示")
-        self.root.geometry("1000x700")
+        self.root.title("工程运维 - 结构展示 v1.0.1")
+        self.root.geometry("1200x800")
         
         # 创建主框架
         main_frame = ttk.Frame(self.root, padding="10")
@@ -39,14 +46,17 @@ class ProjectView:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
         
         # 顶部信息框架
         self.create_info_panel(main_frame)
         
+        # 标签管理框架
+        self.create_tag_panel(main_frame)
+        
         # 主要内容框架
         content_frame = ttk.Frame(main_frame)
-        content_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        content_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
         content_frame.columnconfigure(0, weight=1)
         content_frame.rowconfigure(0, weight=1)
         
@@ -55,6 +65,8 @@ class ProjectView:
         
         # 底部按钮框架
         self.create_button_panel(main_frame)
+        
+        logger.info("UI setup completed")
     
     def create_info_panel(self, parent):
         """创建信息面板"""
@@ -85,6 +97,73 @@ class ProjectView:
             stats_text = f"目录 {stats['directories']} 个，文件 {stats['files']} 个"
             ttk.Label(info_frame, text=stats_text).grid(row=3, column=1, sticky=tk.W)
     
+    def create_tag_panel(self, parent):
+        """创建标签管理面板"""
+        tag_frame = ttk.LabelFrame(parent, text="目录/文件标签", padding="10")
+        tag_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        tag_frame.columnconfigure(1, weight=1)
+        
+        # 标签显示区域
+        ttk.Label(tag_frame, text="可用标签:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        
+        # 标签容器框架
+        self.tag_container = ttk.Frame(tag_frame)
+        self.tag_container.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
+        
+        # 新标签输入框
+        self.new_tag_entry = ttk.Entry(tag_frame, width=15)
+        self.new_tag_entry.grid(row=0, column=2, padx=(5, 0))
+        self.new_tag_entry.bind('<Return>', self.add_new_tag)
+        
+        # 添加标签按钮
+        add_tag_button = ttk.Button(tag_frame, text="+", width=3, command=self.add_new_tag)
+        add_tag_button.grid(row=0, column=3, padx=(5, 0))
+        
+        # 更新标签显示
+        self.update_tag_display()
+    
+    def update_tag_display(self):
+        """更新标签显示"""
+        # 清空现有标签显示
+        for widget in self.tag_container.winfo_children():
+            widget.destroy()
+        
+        # 添加标签按钮
+        for i, tag in enumerate(self.available_tags):
+            tag_frame = ttk.Frame(self.tag_container)
+            tag_frame.grid(row=0, column=i, padx=(0, 5))
+            
+            tag_label = ttk.Label(tag_frame, text=tag, background="lightblue", 
+                                 relief="solid", borderwidth=1, padding="2")
+            tag_label.grid(row=0, column=0)
+            
+            # 删除按钮
+            if tag not in ["功能复合", "单一职责", "服务层"]:  # 默认标签不可删除
+                remove_btn = ttk.Button(tag_frame, text="×", width=3,
+                                       command=lambda t=tag: self.remove_tag(t))
+                remove_btn.grid(row=0, column=1, padx=(2, 0))
+    
+    def add_new_tag(self, event=None):
+        """添加新标签"""
+        new_tag = self.new_tag_entry.get().strip()
+        if new_tag and len(new_tag) <= 5 and new_tag not in self.available_tags:
+            self.available_tags.append(new_tag)
+            self.new_tag_entry.delete(0, tk.END)
+            self.update_tag_display()
+            logger.info(f"Added new tag: {new_tag}")
+    
+    def remove_tag(self, tag):
+        """删除标签"""
+        if tag in self.available_tags and tag not in ["功能复合", "单一职责", "服务层"]:
+            self.available_tags.remove(tag)
+            # 同时从所有节点中删除此标签
+            for node_id in list(self.node_tags.keys()):
+                if tag in self.node_tags[node_id]:
+                    self.node_tags[node_id].remove(tag)
+            self.update_tag_display()
+            self.refresh_tree()
+            logger.info(f"Removed tag: {tag}")
+    
     def create_tree_view(self, parent):
         """创建树形视图"""
         # 创建框架用于放置树形视图和滚动条
@@ -93,16 +172,22 @@ class ProjectView:
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
         
-        # 创建Treeview
-        self.tree = ttk.Treeview(tree_frame, columns=('description',), show='tree headings')
+        # 创建Treeview，增加标签列
+        self.tree = ttk.Treeview(tree_frame, columns=('tags', 'description'), show='tree headings')
         self.tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # 配置列
         self.tree.heading('#0', text='文件/目录结构', anchor=tk.W)
+        self.tree.heading('tags', text='标签', anchor=tk.W)
         self.tree.heading('description', text='功能描述', anchor=tk.W)
         
-        self.tree.column('#0', width=400, minwidth=300)
-        self.tree.column('description', width=500, minwidth=200)
+        self.tree.column('#0', width=350, minwidth=250)
+        self.tree.column('tags', width=150, minwidth=100)
+        self.tree.column('description', width=400, minwidth=200)
+        
+        # 配置树形视图样式，添加行分隔线
+        style = ttk.Style()
+        style.configure("Treeview", rowheight=25)
         
         # 垂直滚动条
         v_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
@@ -117,16 +202,15 @@ class ProjectView:
         # 填充树形数据
         self.populate_tree()
         
-        # 绑定双击事件
+        # 绑定事件
         self.tree.bind('<Double-1>', self.on_item_double_click)
-        
-        # 绑定右键菜单
         self.tree.bind('<Button-3>', self.show_context_menu)
+        self.tree.bind('<Button-1>', self.on_item_click)
     
     def create_button_panel(self, parent):
         """创建按钮面板"""
         button_frame = ttk.Frame(parent)
-        button_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=10)
+        button_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=10)
         button_frame.columnconfigure(2, weight=1)
         
         # 返回按钮
@@ -175,13 +259,22 @@ class ProjectView:
         else:
             icon = "📄"
         
+        # 获取节点标签
+        node_key = f"{node.path}_{node.name}"
+        tags = self.node_tags.get(node_key, [])
+        tags_text = ", ".join(tags) if tags else ""
+        
         # 插入节点
         display_text = f"{icon} {node.name}"
         item_id = self.tree.insert(parent_id, 'end', text=display_text, 
-                                  values=(node.description,))
+                                  values=(tags_text, node.description))
         
         # 存储节点引用映射
         self.item_to_node_map[item_id] = node
+        
+        # 设置行的背景色（创建分隔线效果）
+        if len(self.tree.get_children(parent_id)) % 2 == 0:
+            self.tree.set(item_id, 'tags', tags_text)
         
         # 递归插入子节点
         for child in node.children:
@@ -191,29 +284,104 @@ class ProjectView:
         if node.is_directory and parent_id == '':
             self.tree.item(item_id, open=True)
     
+    def on_item_click(self, event):
+        """处理单击事件 - 用于标签编辑"""
+        item_id = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+        
+        if item_id and column == '#2':  # 标签列
+            self.edit_tags(item_id)
+    
     def on_item_double_click(self, event):
         """处理双击事件"""
-        item_id = self.tree.selection()[0] if self.tree.selection() else None
+        item_id = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+        
         if item_id:
-            self.edit_description(item_id)
+            if column == '#3':  # 描述列
+                self.edit_description_inline(item_id)
+            else:
+                self.edit_description(item_id)
+    
+    def edit_tags(self, item_id):
+        """编辑标签"""
+        node = self.get_node_from_item(item_id)
+        if not node:
+            return
+        
+        node_key = f"{node.path}_{node.name}"
+        current_tags = self.node_tags.get(node_key, [])
+        
+        # 创建标签选择对话框
+        dialog = TagSelectionDialog(self.root, self.available_tags, current_tags)
+        new_tags = dialog.result
+        
+        if new_tags is not None:
+            self.node_tags[node_key] = new_tags
+            # 更新树形视图显示
+            tags_text = ", ".join(new_tags) if new_tags else ""
+            self.tree.set(item_id, 'tags', tags_text)
+            logger.info(f"Updated tags for {node.name}: {new_tags}")
+    
+    def edit_description_inline(self, item_id):
+        """内联编辑描述"""
+        node = self.get_node_from_item(item_id)
+        if not node:
+            return
+        
+        # 获取项目位置
+        bbox = self.tree.bbox(item_id, 'description')
+        if not bbox:
+            return
+        
+        # 创建编辑框
+        edit_frame = tk.Frame(self.tree)
+        edit_entry = tk.Entry(edit_frame, font=("Arial", 9))
+        edit_entry.insert(0, node.description)
+        edit_entry.select_range(0, tk.END)
+        
+        # 定义保存函数
+        def save_description(event=None):
+            new_description = edit_entry.get()
+            node.description = new_description
+            self.tree.set(item_id, 'description', new_description)
+            edit_frame.destroy()
+            logger.info(f"Updated description for {node.name}")
+        
+        def cancel_edit(event=None):
+            edit_frame.destroy()
+        
+        # 绑定事件
+        edit_entry.bind('<Return>', save_description)
+        edit_entry.bind('<Escape>', cancel_edit)
+        edit_entry.bind('<FocusOut>', save_description)
+        
+        edit_entry.pack(fill=tk.BOTH, expand=True)
+        edit_frame.place(x=bbox[0], y=bbox[1], width=bbox[2], height=bbox[3])
+        edit_entry.focus()
     
     def edit_description(self, item_id):
-        """编辑描述"""
+        """编辑描述（使用对话框）"""
         # 获取节点
         node = self.get_node_from_item(item_id)
         if not node:
             return
         
-        # 创建编辑对话框
-        dialog = DescriptionDialog(self.root, node.name, node.description)
-        new_description = dialog.result
-        
-        if new_description is not None:
-            # 更新节点描述
-            node.description = new_description
+        try:
+            # 创建编辑对话框
+            dialog = DescriptionDialog(self.root, node.name, node.description)
+            new_description = dialog.result
             
-            # 更新树形视图显示
-            self.tree.set(item_id, 'description', new_description)
+            if new_description is not None:
+                # 更新节点描述
+                node.description = new_description
+                
+                # 更新树形视图显示
+                self.tree.set(item_id, 'description', new_description)
+                logger.info(f"Updated description for {node.name}")
+        except Exception as e:
+            logger.error(f"Error editing description: {str(e)}")
+            messagebox.showerror("错误", f"编辑描述时出现错误: {str(e)}")
     
     def get_node_from_item(self, item_id):
         """从树形项目获取节点"""
@@ -231,6 +399,7 @@ class ProjectView:
             # 创建右键菜单
             context_menu = tk.Menu(self.root, tearoff=0)
             context_menu.add_command(label="编辑描述", command=lambda: self.edit_description(item_id))
+            context_menu.add_command(label="编辑标签", command=lambda: self.edit_tags(item_id))
             context_menu.add_separator()
             context_menu.add_command(label="展开所有", command=self.expand_all)
             context_menu.add_command(label="折叠所有", command=self.collapse_all)
@@ -296,10 +465,14 @@ class ProjectView:
                 output_path, message = self.exporter.export_to_markdown(self.project_model, file_path)
                 if output_path:
                     messagebox.showinfo("成功", f"导出成功！\n文件保存至: {output_path}")
+                    logger.info(f"Exported to markdown: {output_path}")
                 else:
                     messagebox.showerror("错误", message)
+                    logger.error(f"Export to markdown failed: {message}")
         except Exception as e:
-            messagebox.showerror("错误", f"导出失败: {str(e)}")
+            error_msg = f"导出失败: {str(e)}"
+            messagebox.showerror("错误", error_msg)
+            logger.error(error_msg)
     
     def export_json(self):
         """导出为JSON"""
@@ -314,10 +487,14 @@ class ProjectView:
                 output_path, message = self.exporter.export_to_json(self.project_model, file_path)
                 if output_path:
                     messagebox.showinfo("成功", f"导出成功！\n文件保存至: {output_path}")
+                    logger.info(f"Exported to JSON: {output_path}")
                 else:
                     messagebox.showerror("错误", message)
+                    logger.error(f"Export to JSON failed: {message}")
         except Exception as e:
-            messagebox.showerror("错误", f"导出失败: {str(e)}")
+            error_msg = f"导出失败: {str(e)}"
+            messagebox.showerror("错误", error_msg)
+            logger.error(error_msg)
     
     def export_cursor_rules(self):
         """导出为Cursor Rules"""
@@ -332,14 +509,19 @@ class ProjectView:
                 output_path, message = self.exporter.export_to_cursor_rules(self.project_model, file_path)
                 if output_path:
                     messagebox.showinfo("成功", f"导出成功！\n文件保存至: {output_path}")
+                    logger.info(f"Exported to cursor rules: {output_path}")
                 else:
                     messagebox.showerror("错误", message)
+                    logger.error(f"Export to cursor rules failed: {message}")
         except Exception as e:
-            messagebox.showerror("错误", f"导出失败: {str(e)}")
+            error_msg = f"导出失败: {str(e)}"
+            messagebox.showerror("错误", error_msg)
+            logger.error(error_msg)
     
     def on_back_click(self):
         """处理返回按钮点击"""
         if self.on_back_to_config:
+            logger.info("Returning to config view")
             self.on_back_to_config()
 
 
@@ -348,6 +530,7 @@ class DescriptionDialog:
     
     def __init__(self, parent, node_name, current_description=""):
         self.result = None
+        self.parent = parent
         
         # 创建对话框窗口
         self.dialog = tk.Toplevel(parent)
@@ -355,24 +538,33 @@ class DescriptionDialog:
         self.dialog.geometry("500x200")
         self.dialog.resizable(True, True)
         
-        # 设置模态
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
-        
         # 居中显示
         self.center_dialog(parent)
         
         # 创建界面
         self.setup_ui(current_description)
         
+        # 延迟设置模态，避免grab错误
+        self.dialog.after(100, self.setup_modal)
+        
         # 等待对话框关闭
         self.dialog.wait_window()
     
+    def setup_modal(self):
+        """延迟设置模态"""
+        try:
+            self.dialog.transient(self.parent)
+            self.dialog.grab_set()
+            self.dialog.focus()
+        except tk.TclError as e:
+            logger.warning(f"Modal setup warning: {str(e)}")
+    
     def center_dialog(self, parent):
         """居中显示对话框"""
-        parent.update_idletasks()
+        self.dialog.update_idletasks()
         
         # 获取父窗口位置和大小
+        parent.update_idletasks()
         parent_x = parent.winfo_x()
         parent_y = parent.winfo_y()
         parent_width = parent.winfo_width()
@@ -428,6 +620,107 @@ class DescriptionDialog:
     def on_ok(self):
         """确定按钮"""
         self.result = self.text_entry.get(1.0, tk.END).strip()
+        self.dialog.destroy()
+    
+    def on_cancel(self):
+        """取消按钮"""
+        self.result = None
+        self.dialog.destroy()
+
+
+class TagSelectionDialog:
+    """标签选择对话框"""
+    
+    def __init__(self, parent, available_tags, current_tags):
+        self.result = None
+        self.available_tags = available_tags
+        self.current_tags = current_tags.copy()
+        
+        # 创建对话框窗口
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("选择标签")
+        self.dialog.geometry("400x300")
+        self.dialog.resizable(False, False)
+        
+        # 居中显示
+        self.center_dialog(parent)
+        
+        # 创建界面
+        self.setup_ui()
+        
+        # 延迟设置模态
+        self.dialog.after(100, self.setup_modal)
+        
+        # 等待对话框关闭
+        self.dialog.wait_window()
+    
+    def setup_modal(self):
+        """延迟设置模态"""
+        try:
+            self.dialog.transient(self.dialog.master)
+            self.dialog.grab_set()
+            self.dialog.focus()
+        except tk.TclError as e:
+            logger.warning(f"Tag dialog modal setup warning: {str(e)}")
+    
+    def center_dialog(self, parent):
+        """居中显示对话框"""
+        self.dialog.update_idletasks()
+        parent.update_idletasks()
+        
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        
+        dialog_width = 400
+        dialog_height = 300
+        
+        x = parent_x + (parent_width - dialog_width) // 2
+        y = parent_y + (parent_height - dialog_height) // 2
+        
+        self.dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+    
+    def setup_ui(self):
+        """设置对话框界面"""
+        # 主框架
+        main_frame = ttk.Frame(self.dialog, padding="20")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 配置网格权重
+        self.dialog.columnconfigure(0, weight=1)
+        self.dialog.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=1)
+        
+        # 标签
+        ttk.Label(main_frame, text="请选择标签:").grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
+        
+        # 标签选择区域
+        self.tag_vars = {}
+        tag_frame = ttk.Frame(main_frame)
+        tag_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        
+        for i, tag in enumerate(self.available_tags):
+            var = tk.BooleanVar()
+            var.set(tag in self.current_tags)
+            self.tag_vars[tag] = var
+            
+            cb = ttk.Checkbutton(tag_frame, text=tag, variable=var)
+            cb.grid(row=i//2, column=i%2, sticky=tk.W, padx=(0, 20), pady=2)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=2, column=0, sticky=(tk.W, tk.E))
+        button_frame.columnconfigure(0, weight=1)
+        
+        # 按钮
+        ttk.Button(button_frame, text="确定", command=self.on_ok).grid(row=0, column=1, padx=(5, 0))
+        ttk.Button(button_frame, text="取消", command=self.on_cancel).grid(row=0, column=2, padx=(5, 0))
+    
+    def on_ok(self):
+        """确定按钮"""
+        self.result = [tag for tag, var in self.tag_vars.items() if var.get()]
         self.dialog.destroy()
     
     def on_cancel(self):
